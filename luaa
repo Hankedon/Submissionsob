@@ -1,5 +1,3 @@
--- THIS ONLY CLINET SCRIPT!!!!!!!!!!!!!
-
 local tool = script.Parent
 local player = game.Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
@@ -10,138 +8,109 @@ local TweenService = game:GetService("TweenService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local shootRemote = ReplicatedStorage.Events:WaitForChild("ShootRemote")
 local reloadRemote = ReplicatedStorage.Events:WaitForChild("ReloadRemote")
+local checkAmmoRemote = ReplicatedStorage.Events:WaitForChild("CheckAmmoRemote")
 
 local equipped = false
-local ViewModel
-local animator
-local equipAnim
-local idleAnim
-local shootAnim
-local reloadAnim
-local charShootAnim
-local charIdleAnim
-local charReloadAnim
+local ViewModel, animator
+local ammoCount, maxAmmo = 30, 30
+local shooting, reloading, aiming, holdingMouseButton1 = false, false, false, false
 
-local equipAnimationId = "rbxassetid://98513750065199"
-local idleAnimationId = "rbxassetid://96351859981140"
-local shootAnimationId = "rbxassetid://105038999697769"
-local charShootAnimationId = "rbxassetid://15100979172"
-local charIdleAnimationId = "rbxassetid://15100959769"
-local charReloadAnimationId = "rbxassetid://3972131105"
-local shootSFXId = "rbxassetid://6518454220"
-local reloadAnimationId = "rbxassetid://124837635292059"
-local reloadSFXId = "rbxassetid://3603370582"
+local animationIds = {
+	equip = "rbxassetid://98513750065199",
+	idle = "rbxassetid://96351859981140",
+	shoot = "rbxassetid://105038999697769",
+	reload = "rbxassetid://124837635292059",
+	charShoot = "rbxassetid://15100979172",
+	charIdle = "rbxassetid://15100959769",
+	charReload = "rbxassetid://3972131105"
+}
 
-local shooting = false
-local reloading = false
-local aiming = false
-local holdingMouseButton1 = false
+local sfxIds = {
+	shoot = "rbxassetid://6518454220",
+	reload = "rbxassetid://3603370582"
+}
 
-local checkAmmoRemote = ReplicatedStorage.Events:WaitForChild("CheckAmmoRemote")
-local ammoCount = 30
-local maxAmmo = 30
-local ammoDisplay
-
-local function updateAmmoDisplay()
-	if ammoDisplay then
-		ammoDisplay.Text = "Ammo: " .. ammoCount .. "/" .. maxAmmo
-	end
-end
+local particleProperties = {
+	Texture = "rbxassetid://10564554699",
+	Color = ColorSequence.new(Color3.new(1, 1, 0.8)),
+	Lifetime = NumberRange.new(0.1, 0.2),
+	Rate = 100,
+	Speed = NumberRange.new(10, 20),
+	Rotation = NumberRange.new(-180, 180),
+	RotSpeed = NumberRange.new(100, 200),
+	Size = NumberSequence.new(0.3, 0.6),
+	Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(1, 1) }),
+}
 
 local function playAnimation(animator, animId)
-	if animator then
-		local animation = Instance.new("Animation")
-		animation.AnimationId = animId
-		local success, animTrack = pcall(function()
-			return animator:LoadAnimation(animation)
-		end)
-		if success and animTrack then
-			return animTrack
-		end
+	local animation = Instance.new("Animation")
+	animation.AnimationId = animId
+	local success, animTrack = pcall(function()
+		return animator:LoadAnimation(animation)
+	end)
+	if success and animTrack then
+		return animTrack
 	end
-	return nil
 end
 
-tool.Equipped:Connect(function()
-	equipped = true
-	script.Parent.Handle.Mesh.MeshId = 0
-	script.Parent.Handle.Mesh.TextureId = 0
-	ViewModel = ReplicatedStorage.VMs["MP7 SMG"]:Clone()
-	ViewModel.Parent = Camera
-	ViewModel.PrimaryPart = ViewModel:FindFirstChild("Handle")
-	local animationController = ViewModel:FindFirstChild("AnimationController")
-	if animationController then
-		animator = animationController:FindFirstChild("Animator")
-		equipAnim = playAnimation(animator, equipAnimationId)
-		if equipAnim then
-			equipAnim:Play()
-			equipAnim:AdjustSpeed(1.25)
-			equipAnim.Stopped:Connect(function()
-				task.wait(0.01)
-				idleAnim = playAnimation(animator, idleAnimationId)
-				if idleAnim then
-					idleAnim.Looped = true
-					idleAnim:Play()
-					idleAnim:AdjustSpeed(1)
-				end
-			end)
-		end
+local function updateAmmoDisplay()
+	if player.PlayerGui:FindFirstChild("AmmoDisplay") then
+		player.PlayerGui.AmmoDisplay.Text = "Ammo: " .. ammoCount .. "/" .. maxAmmo
 	end
-	charIdleAnim = playAnimation(character:FindFirstChildOfClass("Humanoid"), charIdleAnimationId)
-	if charIdleAnim then
-		charIdleAnim.Looped = true
-		charIdleAnim:Play()
+end
+
+local function createParticleEmitter(parent)
+	local particleEmitter = Instance.new("ParticleEmitter")
+	for property, value in pairs(particleProperties) do
+		particleEmitter[property] = value
 	end
-	ammoCount = maxAmmo
+	particleEmitter.Parent = parent
+	return particleEmitter
+end
+
+local function initAmmoDisplay()
+	local ammoDisplay = Instance.new("TextLabel", player.PlayerGui)
+	ammoDisplay.Name = "AmmoDisplay"
+	ammoDisplay.Size = UDim2.new(0, 200, 0, 50)
+	ammoDisplay.Position = UDim2.new(0.5, -100, 0.9, 0)
+	ammoDisplay.BackgroundTransparency = 1
+	ammoDisplay.TextColor3 = Color3.new(1, 1, 1)
+	ammoDisplay.TextScaled = true
 	updateAmmoDisplay()
-end)
-
-tool.Unequipped:Connect(function()
-	equipped = false
-	if equipAnim then equipAnim:Stop() end
-	if idleAnim then idleAnim:Stop() end
-	if reloadAnim then reloadAnim:Stop() end
-	if charIdleAnim then charIdleAnim:Stop() end
-	if charShootAnim then charShootAnim:Stop() end
-	if ViewModel then ViewModel:Destroy() end
-end)
-
-local mouse = player:GetMouse()
+end
 
 local function playShootAnimation()
-	if not shooting and not reloading then
-		local ammoLeft = checkAmmoRemote:InvokeServer()
-		if ammoLeft > 0 then
-			shooting = true
-			shootAnim = playAnimation(animator, shootAnimationId)
-			if shootAnim then
-				shootAnim:Play()
-				shootAnim:AdjustSpeed(2)
-				shootAnim.Stopped:Connect(function()
-					shooting = false
-				end)
-			end
-			charShootAnim = playAnimation(character:FindFirstChildOfClass("Humanoid"), charShootAnimationId)
-			if charShootAnim then charShootAnim:Play() end
-			local shootSFX = Instance.new("Sound")
-			shootSFX.SoundId = shootSFXId
-			shootSFX.Parent = ViewModel.PrimaryPart
-			shootSFX:Play()
-			shootSFX.Stopped:Connect(function() shootSFX:Destroy() end)
-			wait(0.01)
-			shootRemote:FireServer(mouse.Hit)
-			ammoCount = ammoCount - 1
-			updateAmmoDisplay()
-		else
-			print("Out of ammo, reload required!")
+	if not shooting and not reloading and ammoCount > 0 then
+		shooting = true
+		local muzzleFlash = createParticleEmitter(ViewModel.PrimaryPart)
+		muzzleFlash:Emit(10)
+
+		local shootAnim = playAnimation(animator, animationIds.shoot)
+		if shootAnim then
+			shootAnim:Play()
+			shootAnim:AdjustSpeed(2)
+			shootAnim.Stopped:Connect(function() shooting = false end)
 		end
+
+		local charShootAnim = playAnimation(character:FindFirstChildOfClass("Humanoid"), animationIds.charShoot)
+		if charShootAnim then charShootAnim:Play() end
+
+		local shootSFX = Instance.new("Sound", ViewModel.PrimaryPart)
+		shootSFX.SoundId = sfxIds.shoot
+		shootSFX:Play()
+		shootSFX.Stopped:Connect(function() shootSFX:Destroy() end)
+
+		wait(0.01)
+		shootRemote:FireServer(player:GetMouse().Hit)
+		ammoCount -= 1
+		updateAmmoDisplay()
 	end
 end
 
 local function reload()
 	if not reloading then
 		reloading = true
-		reloadAnim = playAnimation(animator, reloadAnimationId)
+		local reloadAnim = playAnimation(animator, animationIds.reload)
 		if reloadAnim then
 			reloadAnim:Play()
 			reloadAnim:AdjustSpeed(0.8)
@@ -154,15 +123,53 @@ local function reload()
 		else
 			reloading = false
 		end
-		charReloadAnim = playAnimation(character:FindFirstChildOfClass("Humanoid"), charReloadAnimationId)
+
+		local charReloadAnim = playAnimation(character:FindFirstChildOfClass("Humanoid"), animationIds.charReload)
 		if charReloadAnim then charReloadAnim:Play() end
-		local reloadSFX = Instance.new("Sound")
-		reloadSFX.SoundId = reloadSFXId
-		reloadSFX.Parent = ViewModel.PrimaryPart
+
+		local reloadSFX = Instance.new("Sound", ViewModel.PrimaryPart)
+		reloadSFX.SoundId = sfxIds.reload
 		reloadSFX:Play()
 		reloadSFX.Stopped:Connect(function() reloadSFX:Destroy() end)
 	end
 end
+
+tool.Equipped:Connect(function()
+	equipped = true
+	ViewModel = ReplicatedStorage.VMs["MP7 SMG"]:Clone()
+	ViewModel.Parent = Camera
+	ViewModel.PrimaryPart = ViewModel:FindFirstChild("Handle")
+
+	local animationController = ViewModel:FindFirstChild("AnimationController")
+	if animationController then
+		animator = animationController:FindFirstChild("Animator")
+		local equipAnim = playAnimation(animator, animationIds.equip)
+		if equipAnim then
+			equipAnim:Play()
+			equipAnim:AdjustSpeed(1.25)
+			equipAnim.Stopped:Connect(function()
+				local idleAnim = playAnimation(animator, animationIds.idle)
+				if idleAnim then
+					idleAnim.Looped = true
+					idleAnim:Play()
+				end
+			end)
+		end
+	end
+
+	local charIdleAnim = playAnimation(character:FindFirstChildOfClass("Humanoid"), animationIds.charIdle)
+	if charIdleAnim then
+		charIdleAnim.Looped = true
+		charIdleAnim:Play()
+	end
+	ammoCount = maxAmmo
+	updateAmmoDisplay()
+end)
+
+tool.Unequipped:Connect(function()
+	equipped = false
+	if ViewModel then ViewModel:Destroy() end
+end)
 
 uis.InputBegan:Connect(function(input, isProcessed)
 	if equipped and not isProcessed then
@@ -195,10 +202,8 @@ uis.InputEnded:Connect(function(input)
 end)
 
 RunService.RenderStepped:Connect(function()
-	if equipped and ViewModel then
-		if ViewModel.PrimaryPart then
-			ViewModel:SetPrimaryPartCFrame(Camera.CFrame)
-		end
+	if equipped and ViewModel and ViewModel.PrimaryPart then
+		ViewModel:SetPrimaryPartCFrame(Camera.CFrame)
 		for _, v in pairs(ViewModel:GetChildren()) do
 			if v:IsA("BasePart") then
 				v.CanCollide = false
@@ -207,44 +212,4 @@ RunService.RenderStepped:Connect(function()
 	end
 end)
 
-local function createHitmarker()
-	local hitmarker = Instance.new("ScreenGui", player.PlayerGui)
-	local frame = Instance.new("Frame", hitmarker)
-	frame.Size = UDim2.new(0, 100, 0, 100)
-	frame.Position = UDim2.new(0.5, -50, 0.5, -50)
-	frame.BackgroundColor3 = Color3.new(1, 0, 0)
-	frame.BackgroundTransparency = 0.5
-	hitmarker.Enabled = false
-	return hitmarker
-end
-
-local function onHit()
-	local hitmarker = createHitmarker()
-	hitmarker.Enabled = true
-	wait(0.1)
-	hitmarker.Enabled = false
-end
-
-shootRemote.OnClientEvent:Connect(onHit)
-
-RunService.Heartbeat:Connect(function()
-	if equipped and aiming and ViewModel then
-		for _, v in pairs(ViewModel:GetChildren()) do
-			if v:IsA("BasePart") and v.Name ~= "Handle" then
-				v.Transparency = 0.5
-			end
-		end
-	end
-end)
-
-local function initAmmoDisplay()
-	ammoDisplay = Instance.new("TextLabel", player.PlayerGui)
-	ammoDisplay.Size = UDim2.new(0, 200, 0, 50)
-	ammoDisplay.Position = UDim2.new(0.5, -100, 0.9, 0)
-	ammoDisplay.BackgroundTransparency = 1
-	ammoDisplay.TextColor3 = Color3.new(1, 1, 1)
-	ammoDisplay.TextScaled = true
-	updateAmmoDisplay()
-end
-
-initAmmoDisplay() 
+initAmmoDisplay()
