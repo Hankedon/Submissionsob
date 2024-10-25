@@ -1,45 +1,363 @@
-local Players = game:GetService("Players")
+--Client Script VM
+local tool = script.Parent
+local player = game.Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local Camera = workspace.CurrentCamera
+local RunService = game:GetService("RunService")
+local uis = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local PrivateServerOwner = game.PrivateServerOwnerId
+local shootRemote = ReplicatedStorage.Events:WaitForChild("ShootRemote")
+local reloadRemote = ReplicatedStorage.Events:WaitForChild("ReloadRemote")
 
-local function onPlayerChatted(player, message)
-	if game.PrivateServerId ~= "" and player.UserId == PrivateServerOwner then
-		if message:sub(1, 5) == "/kick" then
-			local targetPlayerName = message:sub(7)
-			local targetPlayer = Players:FindFirstChild(targetPlayerName)
-			if targetPlayer then
-				targetPlayer:Kick("You have been kicked by the server owner.")
+local equipped = false
+local ViewModel
+local animator
+local equipAnim
+local idleAnim
+local shootAnim
+local reloadAnim
+local charShootAnim
+local charIdleAnim
+local charReloadAnim
+
+local equipAnimationId = "rbxassetid://139098967965444"
+local idleAnimationId = "rbxassetid://78688990823576"
+local shootAnimationId = "rbxassetid://96318303439864"
+local charShootAnimationId = "rbxassetid://15100979172"
+local charIdleAnimationId = "rbxassetid://15100959769"
+local charReloadAnimationId = "rbxassetid://3972131105"
+local shootSFXId = "rbxassetid://6518454220" 
+local reloadAnimationId = "rbxassetid://93988895254443"
+local reloadSFXId = "rbxassetid://3603370582"
+
+local shooting = false
+local shootCooldown = false
+local reloading = false
+local aiming = false
+
+local checkAmmoRemote = ReplicatedStorage.Events:WaitForChild("CheckAmmoRemote") 
+
+local function playAnimation(animator, animId)
+	if animator then
+		local animation = Instance.new("Animation")
+		animation.AnimationId = animId
+		local success, animTrack = pcall(function()
+			return animator:LoadAnimation(animation)
+		end)
+
+		if success and animTrack then
+			return animTrack
+		end
+	end
+	return nil
+end
+
+tool.Equipped:Connect(function()
+	equipped = true
+	script.Parent.Handle.Mesh.MeshId = 0
+	script.Parent.Handle.Mesh.TextureId = 0
+
+	ViewModel = ReplicatedStorage.VMs.USP:Clone()
+	ViewModel.Parent = Camera
+
+	local animationController = ViewModel:FindFirstChild("AnimationController")
+	if animationController then
+		animator = animationController:FindFirstChild("Animator")
+		equipAnim = playAnimation(animator, equipAnimationId)
+		if equipAnim then
+			equipAnim:Play()
+			equipAnim:AdjustSpeed(2)
+			equipAnim.Stopped:Connect(function()
+				task.wait(0.01) 
+				idleAnim = playAnimation(animator, idleAnimationId)
+				if idleAnim then
+					idleAnim.Looped = true
+					idleAnim:Play()
+					idleAnim:AdjustSpeed(1.15)
+				end
+			end)
+		end
+	end
+
+	charIdleAnim = playAnimation(character:FindFirstChildOfClass("Humanoid"), charIdleAnimationId)
+	if charIdleAnim then
+		charIdleAnim.Looped = true
+		charIdleAnim:Play()
+	end
+end)
+
+tool.Unequipped:Connect(function()
+	equipped = false
+
+	if equipAnim then
+		equipAnim:Stop()
+	end
+	if idleAnim then
+		idleAnim:Stop()
+	end
+	if reloadAnim then
+		reloadAnim:Stop()
+	end
+	if charIdleAnim then
+		charIdleAnim:Stop()
+	end
+	if charShootAnim then
+		charShootAnim:Stop()
+	end
+	if ViewModel then
+		ViewModel:Destroy()
+	end
+end)
+local mouse = player:GetMouse()
+
+local function playShootAnimation()
+	if not shooting and not shootCooldown and not reloading then
+		local ammoLeft = checkAmmoRemote:InvokeServer()
+		if ammoLeft > 0 then
+			shooting = true
+			shootCooldown = true
+
+			shootAnim = playAnimation(animator, shootAnimationId)
+			if shootAnim then
+				shootAnim:Play()
+				shootAnim:AdjustSpeed(2)
+				shootAnim.Stopped:Connect(function()
+					shooting = false
+				end)
 			end
-		elseif message == "/shutdown" then
-			for _, plr in pairs(Players:GetPlayers()) do
-				plr:Kick("Server has been shut down by the owner.")
+
+			charShootAnim = playAnimation(character:FindFirstChildOfClass("Humanoid"), charShootAnimationId)
+			if charShootAnim then
+				charShootAnim:Play()
 			end
-		elseif message:sub(1, 7) == "/freeze" then
-			local targetPlayerName = message:sub(9)
-			local targetPlayer = Players:FindFirstChild(targetPlayerName)
-			if targetPlayer and targetPlayer.Character then
-				targetPlayer.Character.HumanoidRootPart.Anchored = true
-			end
-		elseif message:sub(1, 5) == "/kill" then
-			local targetPlayerName = message:sub(7)
-			local targetPlayer = Players:FindFirstChild(targetPlayerName)
-			if targetPlayer and targetPlayer.Character then
-				targetPlayer.Character.Humanoid.Health = 0
-			end
-		elseif message:sub(1, 9) == "/unfreeze" then
-			local targetPlayerName = message:sub(11)
-			local targetPlayer = Players:FindFirstChild(targetPlayerName)
-			if targetPlayer and targetPlayer.Character then
-				targetPlayer.Character.HumanoidRootPart.Anchored = false
-			end
-		elseif message == "/commands" then
-			ReplicatedStorage.ShowCommands:FireClient(player, "/kick [player], /shutdown, /freeze [player], /kill [player], /unfreeze [player]")
+
+			local shootSFX = Instance.new("Sound")
+			shootSFX.SoundId = shootSFXId
+			shootSFX.Parent = ViewModel.PrimaryPart
+			shootSFX:Play()
+			shootSFX.Stopped:Connect(function()
+				shootSFX:Destroy()
+			end)
+
+			ViewModel.Handle.GunMuzzlePoint.Secondary.Enabled = true
+			ViewModel.Handle.GunMuzzlePoint.Sparks.Enabled = true
+			wait(0.01)
+			ViewModel.Handle.GunMuzzlePoint.Secondary.Enabled = false
+			ViewModel.Handle.GunMuzzlePoint.Sparks.Enabled = false
+
+			shootRemote:FireServer(mouse.Hit)
+
+			task.delay(0.05, function() 
+				shootCooldown = false
+			end)
+		else
+			print("Out of ammo, reload required!")
 		end
 	end
 end
 
-Players.PlayerAdded:Connect(function(player)
-	player.Chatted:Connect(function(message)
-		onPlayerChatted(player, message)
-	end)
+local function reload()
+	if not reloading then
+		reloading = true
+
+		reloadAnim = playAnimation(animator, reloadAnimationId)
+		if reloadAnim then
+			reloadAnim:Play()
+			reloadAnim:AdjustSpeed(1.5)
+			reloadAnim.Stopped:Connect(function()
+				reloadRemote:FireServer() -- Fire to server to handle reloading
+				reloading = false
+			end)
+		else
+			reloading = false
+		end
+
+		charReloadAnim = playAnimation(character:FindFirstChildOfClass("Humanoid"), charReloadAnimationId)
+		if charReloadAnim then
+			charReloadAnim:Play()
+		end
+
+		local reloadSFX = Instance.new("Sound")
+		reloadSFX.SoundId = reloadSFXId
+		reloadSFX.Parent = ViewModel.PrimaryPart
+		reloadSFX:Play()
+		reloadSFX.Stopped:Connect(function()
+			reloadSFX:Destroy()
+		end)
+	end
+end
+
+uis.InputBegan:Connect(function(input, isProcessed)
+	if equipped and not isProcessed then
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			playShootAnimation()
+		elseif input.KeyCode == Enum.KeyCode.R then
+			reload()
+		elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
+			aiming = true
+			local aimTween = TweenService:Create(Camera, TweenInfo.new(0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), { FieldOfView = 50 })
+			aimTween:Play()
+		end
+	end
 end)
+
+uis.InputEnded:Connect(function(input)
+	if equipped then
+		if input.UserInputType == Enum.UserInputType.MouseButton2 then
+			aiming = false
+			local aimTween = TweenService:Create(Camera, TweenInfo.new(0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), { FieldOfView = 70 })
+			aimTween:Play()
+		end
+	end
+end)
+
+RunService.RenderStepped:Connect(function()
+	if equipped and ViewModel then
+		ViewModel:SetPrimaryPartCFrame(Camera.CFrame)
+
+		for _, v in pairs(ViewModel:GetChildren()) do
+			if v:IsA("BasePart") then
+				v.CanCollide = false
+			end
+		end
+	end
+end)
+
+
+--Server Script: Shoot and etc
+print("applied new update")
+
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local shootRemote = ReplicatedStorage.Events:WaitForChild("ShootRemote")
+local reloadRemote = ReplicatedStorage.Events:WaitForChild("ReloadRemote")
+local checkAmmoRemote = ReplicatedStorage.Events:WaitForChild("CheckAmmoRemote")
+local maxMag = 12
+local tool = script.Parent
+
+
+local jitengine = ReplicatedStorage:FindFirstChild("jit_engine")
+local misc = jitengine:FindFirstChild("misc")
+local bloom = 1
+
+local gunmisc = misc.gunmisc
+local partcache = require(gunmisc.modules.PartCache)
+local fastcast = require(gunmisc.modules.FastCastRedux)
+local config = require(tool.assets.config)
+local bulletcache = partcache.new(gunmisc.projectile, 100, workspace.gunmisc)
+
+local caster = fastcast.new()
+local casterbehaviour = caster.newBehavior()
+casterbehaviour.MaxDistance = config.maxdistance
+casterbehaviour.AutoIgnoreContainer = true
+casterbehaviour.Acceleration = config.acceleration
+casterbehaviour.CosmeticBulletContainer = workspace.gunmisc
+casterbehaviour.CosmeticBulletProvider = bulletcache
+
+
+local function applyDamage(hitPart)
+	local character = hitPart.Parent
+	if character then
+		local humanoid = character:FindFirstChildOfClass("Humanoid")
+		if humanoid then
+			local damage = hitPart.Name == "Head" and  50 or 20
+			humanoid:TakeDamage(damage)
+		end
+	end
+end
+
+caster.RayHit:Connect(function(cast, result, velocity, bullet)
+	local hit = result.Instance
+	local character = hit:FindFirstAncestorWhichIsA("Model")
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+
+	if humanoid then
+		applyDamage(hit)
+
+		local attachment = gunmisc.hitparticle.hitparticle:Clone()
+		attachment.Parent = workspace.Terrain
+		attachment.WorldCFrame = CFrame.lookAt(result.Position, result.Position + result.Normal)
+
+		for _, i in pairs(attachment:GetChildren()) do
+			if i:IsA("ParticleEmitter") then
+				i.Color = ColorSequence.new(Color3.new(0.839216, 0.396078, 0.317647))
+				i:Emit(math.random(5, 15))
+			end
+		end
+
+		bulletcache:ReturnPart(bullet)
+	end
+end)
+
+caster.LengthChanged:Connect(function(cast, lastpoint, direction, length, velocity, bullet)
+	if bullet then
+		local bulletLength = bullet.Size.Z / 2
+		local offset = CFrame.new(0, 0, -(length - bulletLength))
+		bullet.CFrame = CFrame.lookAt(lastpoint, lastpoint + direction):ToWorldSpace(offset)
+	end
+end)
+
+shootRemote.OnServerEvent:Connect(function(player, mouseHit)
+	if mouseHit then
+		local tool = player.Character and player.Character:FindFirstChildOfClass("Tool")
+		if tool then
+			local inMag = tool:FindFirstChild("InMag")
+			if inMag and inMag.Value > 0 then
+				inMag.Value -= 1
+
+				local gunMuzzlePoint = script.Parent:FindFirstChild("Handle").FirePoint
+				if gunMuzzlePoint then
+					local model = script.Parent:FindFirstChild("Model")
+					local randomOffset = Vector3.new(
+						Random.new():NextNumber(-config.spread, config.spread) * bloom,
+						Random.new():NextNumber(-config.spread, config.spread) * bloom,
+						Random.new():NextNumber(-config.spread, config.spread) * bloom
+					)
+					local grip = model.Grip
+
+					if grip then
+						local firePoint = script.Parent.Handle.FirePoint
+						if firePoint and firePoint:IsA("Attachment") then
+							local bulletOrigin = gunMuzzlePoint.Position
+							local vectordirection = ((mouseHit.Position - script.Parent.Handle.FirePoint.WorldPosition) + randomOffset).Unit
+
+							caster:Fire(firePoint.WorldPosition, vectordirection, config.velocity, casterbehaviour)
+						else
+							warn("FirePoint is either missing or not an Attachment.")
+						end
+					else
+						warn("Grip is missing in the tool's model.")
+					end
+				else
+					warn("GunMuzzlePoint is missing.")
+				end
+			end
+		end
+	end
+end)
+
+
+reloadRemote.OnServerEvent:Connect(function(player)
+	local tool = player.Character and player.Character:FindFirstChildOfClass("Tool")
+	if tool then
+		local inMag = tool:FindFirstChild("InMag")
+		local reserveMag = tool:FindFirstChild("ReserveMag")
+		if inMag and reserveMag then
+			local reloadAmount = math.min(maxMag - inMag.Value, reserveMag.Value)
+			inMag.Value += reloadAmount
+			reserveMag.Value -= reloadAmount
+		end
+	end
+end)
+
+checkAmmoRemote.OnServerInvoke = function(player)
+	local tool = player.Character and player.Character:FindFirstChildOfClass("Tool")
+	if tool then
+		local inMag = tool:FindFirstChild("InMag")
+		if inMag then
+			return inMag.Value
+		end
+	end
+	return 0
+end
